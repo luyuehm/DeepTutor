@@ -1,0 +1,38 @@
+# ============================================
+# DeepTutor 私有化 — 本地 LLM 网关 (Ollama) 覆盖
+# ============================================
+# 追加到 docker-compose.ghcr.yml 使用:
+#   python scripts/docker_compose.py -f docker-compose.ghcr.yml -f private/compose.local-llm.yml up -d
+# 或
+#   ./private/deploy.sh --local-llm
+#
+# 说明:
+#   * 额外拉起一个 Ollama 容器作为本地 LLM 网关，只绑定 127.0.0.1:11434
+#   * DeepTutor 容器通过 host.docker.internal:11434 访问它
+#     (compose 的 host-gateway 别名，Linux 下等价 --add-host=host.docker.internal:host-gateway)
+#   * 模型需先 pull，例如:
+#       docker compose -f docker-compose.ghcr.yml -f private/compose.local-llm.yml exec ollama ollama pull qwen2.5:7b
+#   * 然后在 设置→模型 把连接 base_url 指到 http://host.docker.internal:11434/v1，
+#     model 填已 pull 的模型名；embedding 用 http://host.docker.internal:11434/api/embed
+#   * 用 vLLM / llama.cpp 替代时，把下方 image 与端口换成对应服务即可。
+#     同样走 host.docker.internal 从 deeptutor 容器访问。
+# ============================================
+
+services:
+  # 本地 LLM 网关 — 仅环回绑定，外部不可达
+  ollama:
+    image: ollama/ollama:latest
+    container_name: deeptutor-ollama
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ./data/ollama:/root/.ollama
+    networks:
+      - deeptutor-network
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
