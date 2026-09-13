@@ -488,6 +488,7 @@ from deeptutor.api.routers import (
     dashboard,
     imports,
     knowledge,
+    license,
     marginnote4,
     mastery_path,
     mcp_settings,
@@ -510,6 +511,7 @@ from deeptutor.api.routers import (
     skills,
     space_cli_apps,
     space_mcp,
+    sso,
     subagents,
     system,
     unified_ws,
@@ -525,6 +527,7 @@ from deeptutor.api.routers.multi_user import router as multi_user_router  # noqa
 
 # Auth router is public — login/logout/register/status require no token
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+app.include_router(sso.router, prefix="/api/auth/sso", tags=["sso"])
 app.include_router(outputs.router, prefix="/files/outputs", tags=["outputs"])
 app.include_router(
     workspace.files_router,
@@ -677,6 +680,7 @@ app.include_router(
     prefix="/api/payment",
     tags=["payment-admin"],
 )
+app.include_router(license.router, prefix="/api/license", tags=["license"], dependencies=_auth)
 app.include_router(
     subagents.router, prefix="/api/subagents", tags=["subagents"], dependencies=_auth
 )

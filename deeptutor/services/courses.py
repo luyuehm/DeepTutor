@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 import json
+import logging
 from pathlib import Path
 import threading
 import time
@@ -28,6 +29,8 @@ import uuid
 
 from deeptutor.services.file_io import atomic_write_json
 from deeptutor.services.path_service import get_path_service
+
+logger = logging.getLogger(__name__)
 
 COURSE_COLORS: tuple[str, ...] = (
     "#C65D2E",
@@ -158,6 +161,9 @@ class StudyCourse:
     status: str = "active"
     #: When it was archived, so a review can state the span it covers.
     archived_at: float = 0.0
+    #: Operating entity this course belongs to (empty on legacy single-tenant
+    #: deployments; see :mod:`deeptutor.multi_user.tenant`).
+    tenant_id: str = ""
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -247,6 +253,13 @@ def _lock_for(path: Path) -> threading.RLock:
         return lock
 
 
+def _tenant_for_record() -> str:
+    """Tenant scope for a course record (see :mod:`deeptutor.multi_user.tenant`)."""
+    from deeptutor.multi_user.tenant import denormalized_tenant
+
+    return denormalized_tenant(kind="course")
+
+
 class CourseService:
     """Small durable registry stored inside the active user's workspace."""
 
@@ -312,6 +325,7 @@ class CourseService:
                         else "active"
                     ),
                     archived_at=float(row.get("archived_at") or 0.0),
+                    tenant_id=str(row.get("tenant_id") or ""),
                 )
             )
         return courses
@@ -326,6 +340,20 @@ class CourseService:
             raise CourseNameConflictError(f"A course named {name!r} already exists.")
 
     def list_courses(self) -> list[StudyCourse]:
+        if not self._tenant_enabled():
+            return self._list_courses_unscoped()
+        tenant = _tenant_for_record()
+        with self._lock:
+            return sorted(
+                (
+                    course
+                    for course in self._load()
+                    if str(course.tenant_id or "") == str(tenant)
+                ),
+                key=lambda course: (course.created_at, course.name.casefold()),
+            )
+
+    def _list_courses_unscoped(self) -> list[StudyCourse]:
         with self._lock:
             return sorted(
                 self._load(), key=lambda course: (course.created_at, course.name.casefold())
@@ -336,8 +364,16 @@ class CourseService:
         with self._lock:
             for course in self._load():
                 if course.id == target:
+                    if self._tenant_enabled() and str(course.tenant_id or "") != _tenant_for_record():
+                        continue
                     return course
         raise CourseNotFoundError(target)
+
+    @staticmethod
+    def _tenant_enabled() -> bool:
+        from deeptutor.multi_user.tenant import is_multi_tenant_enabled
+
+        return is_multi_tenant_enabled()
 
     def create(
         self,
@@ -364,10 +400,29 @@ class CourseService:
                 instructions=_clip(instructions, INSTRUCTIONS_LIMIT),
                 default_capability=str(default_capability or "").strip()[:64],
                 default_persona=str(default_persona or "").strip()[:80],
+                tenant_id=_tenant_for_record(),
             )
             courses.append(course)
             self._save(courses)
-            return course
+        self._emit_created_event(course)
+        return course
+
+    def _emit_created_event(self, course: StudyCourse) -> None:
+        """Best-effort D4 hook: notify subscribers a course was published."""
+        try:
+            from deeptutor.services.webhooks.service import emit_event
+
+            emit_event(
+                "course.published",
+                {
+                    "course_id": course.id,
+                    "name": course.name,
+                    "tenant_id": course.tenant_id,
+                    "published_at": course.updated_at,
+                },
+            )
+        except Exception:  # pragma: no cover - webhook must never break course ops
+            logger.exception("webhook emit failed for course.published")
 
     def update(
         self,
