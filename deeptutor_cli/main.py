@@ -16,6 +16,7 @@ from .config_cmd import register as register_config
 from .doctor import register as register_doctor
 from .init_cmd import register as register_init
 from .kb import register as register_kb
+from .license_cmd import register as register_license
 from .memory import register as register_memory
 from .notebook import register as register_notebook
 from .partner import register as register_partner
@@ -44,6 +45,7 @@ plugin_app = typer.Typer(help="List plugins.")
 config_app = typer.Typer(help="Inspect configuration.")
 session_app = typer.Typer(help="Manage shared sessions.")
 notebook_app = typer.Typer(help="Manage notebooks and imported markdown records.")
+license_app = typer.Typer(help="Manage Enterprise licenses (D5).")
 provider_app = typer.Typer(help="Manage provider OAuth login.")
 book_app = typer.Typer(help="Manage interactive Books (BookEngine).")
 workspace_app = typer.Typer(help="Manage the user content workspace.")
@@ -58,6 +60,7 @@ app.add_typer(plugin_app, name="plugin")
 app.add_typer(config_app, name="config")
 app.add_typer(session_app, name="session")
 app.add_typer(notebook_app, name="notebook")
+app.add_typer(license_app, name="license")
 app.add_typer(provider_app, name="provider")
 app.add_typer(book_app, name="book")
 app.add_typer(workspace_app, name="workspace")
@@ -73,6 +76,7 @@ register_session(session_app)
 register_notebook(notebook_app)
 register_provider(provider_app)
 register_book(book_app)
+register_license(license_app)
 register_workspace(workspace_app)
 register_doctor(app)
 register_init(app)

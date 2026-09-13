@@ -60,6 +60,17 @@ logger = logging.getLogger(__name__)
 ORDER_ROOT = SYSTEM_ROOT / "payment"
 ORDERS_FILE_NAME = "orders.json"
 
+
+def _tenant_for_record() -> str:
+    """The tenant this order record is scoped to.
+
+    See :mod:`deeptutor.multi_user.tenant` — on a multi-tenant deployment
+    this raises loudly when the request forgot to pin a tenant.
+    """
+    from deeptutor.multi_user.tenant import denormalized_tenant
+
+    return denormalized_tenant(kind="order")
+
 ORDER_STATUS_PENDING = "pending"
 ORDER_STATUS_PAID = "paid"
 ORDER_STATUS_GRANTED = "granted"
@@ -246,13 +257,26 @@ def list_orders(
     *,
     user_id: str | None = None,
     status: str | None = None,
+    tenant_id: str | None = None,
     limit: int = 200,
 ) -> list[dict[str, Any]]:
+    from deeptutor.multi_user.tenant import (
+        denormalized_tenant,
+        is_multi_tenant_enabled,
+    )
+
+    # On a multi-tenant deployment, every read must be scoped to the current
+    # tenant by default — an operator must not see another operator's orders
+    # just because it forgot to pass the filter.
+    if tenant_id is None and is_multi_tenant_enabled():
+        tenant_id = denormalized_tenant(kind="order")
     store = _load_store()
     rows = list(store["orders"].values())
     rows.sort(key=lambda row: str(row.get("created_at") or ""), reverse=True)
     out: list[dict[str, Any]] = []
     for row in rows:
+        if tenant_id is not None and str(row.get("tenant_id") or "") != str(tenant_id):
+            continue
         if user_id is not None and str(row.get("user_id") or "") != user_id:
             continue
         if status is not None and str(row.get("status") or "") != status:
@@ -313,6 +337,7 @@ def create_order(
         "out_trade_no": out_trade_no,
         "user_id": user_id,
         "username": username,
+        "tenant_id": _tenant_for_record(),
         "plan": plan,
         "gateway": gateway,
         "amount_fen": int(plan.get("price_fen") or 0),
@@ -467,7 +492,28 @@ def fulfill_order(
         order["last_error"] = None
         _save_store(store)
     logger.info("payment order %s fulfilled for user %s", order_id, user_id)
+    _emit_fulfilled_event(order)
     return normalize_order(order)
+
+
+def _emit_fulfilled_event(order: dict[str, Any]) -> None:
+    """Best-effort D4 hook: notify subscribers an order was fulfilled."""
+    try:
+        from deeptutor.services.webhooks.service import emit_event
+
+        emit_event(
+            "order.fulfilled",
+            {
+                "order_id": order.get("order_id"),
+                "order_no": order.get("out_trade_no"),
+                "user_id": order.get("user_id"),
+                "tenant_id": order.get("tenant_id") or "",
+                "amount_fen": order.get("amount_fen"),
+                "granted_at": order.get("granted_at"),
+            },
+        )
+    except Exception:  # pragma: no cover - webhook must never break payment ops
+        logger.exception("webhook emit failed for order.fulfilled")
 
 
 # ---------------------------------------------------------------------------

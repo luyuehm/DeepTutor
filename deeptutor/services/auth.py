@@ -75,6 +75,7 @@ class TokenPayload:
     user_id: str = ""
     device_credential_id: str = ""
     device_session_nonce: str = ""
+    tenant_id: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -261,20 +262,25 @@ def create_token(
     user_id: str | None = None,
     device_credential_id: str = "",
     device_session_nonce: str = "",
+    tenant_id: str = "",
 ) -> str:
     """Create a signed JWT for the given username and role."""
     from jose import jwt
+
+    from deeptutor.multi_user.tenant import get_current_tenant
 
     if not user_id:
         record = _load_users().get(username) or {}
         user_id = str(record.get("id") or "")
 
+    effective_tenant = str(tenant_id or get_current_tenant() or "")
     payload = {
         "sub": username,
         "role": role,
         "uid": user_id,
         "dcid": device_credential_id,
         "dcs": device_session_nonce,
+        "tenant": effective_tenant,
         "exp": datetime.now(timezone.utc) + timedelta(hours=TOKEN_EXPIRE_HOURS),
         "iat": datetime.now(timezone.utc),
     }
@@ -338,6 +344,7 @@ def decode_token(token: str) -> TokenPayload | None:
             user_id=user_id,
             device_credential_id=device_credential_id,
             device_session_nonce=device_session_nonce,
+            tenant_id=str(payload.get("tenant") or ""),
         )
     except JWTError:
         return None

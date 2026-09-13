@@ -283,8 +283,13 @@ def _install_current_user(payload: TokenPayload | None) -> _CtxToken:
     handler runs. Skipping it leaves ``get_current_path_service()`` falling
     back to the admin workspace — the silent-routing root cause of #481.
     """
+    from deeptutor.multi_user.tenant import set_current_tenant
+
     user = local_admin_user() if payload is None else user_from_token_payload(payload)
-    return set_current_user(user)
+    token = set_current_user(user)
+    tenant_id = str(getattr(payload, "tenant_id", "") or "") if payload else ""
+    set_current_tenant(tenant_id)
+    return token
 
 
 async def require_auth(
