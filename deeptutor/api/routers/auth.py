@@ -38,6 +38,10 @@ from deeptutor.multi_user.device_credentials import (
     list_device_credentials,
     revoke_device_credential,
 )
+from deeptutor.multi_user.login_rate_limit import (
+    client_ip,
+    login_limiter,
+)
 from deeptutor.multi_user.identity import get_user_by_id
 from deeptutor.multi_user.learning_access import learning_policy_for_user
 from deeptutor.multi_user.models import AccountPreset
@@ -530,21 +534,32 @@ async def auth_status(
 
 
 @router.post("/login")
-async def login(body: LoginRequest, response: Response) -> dict:
+async def login(body: LoginRequest, request: Request, response: Response) -> dict:
     """Validate credentials and set a JWT cookie."""
     if not AUTH_ENABLED:
         return {"ok": True, "message": "Auth is disabled — no login required."}
+
+    ip = client_ip(request)
+    locked, retry_after = login_limiter.is_locked(ip, body.username)
+    if locked:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many failed login attempts. Try again in {retry_after}s.",
+            headers={"Retry-After": str(retry_after)},
+        )
 
     if POCKETBASE_ENABLED:
         # PocketBase mode: email = username field for backwards-compat with the
         # existing LoginRequest schema; users can pass their email as "username".
         pb_result = authenticate_pb(body.username, body.password)
         if not pb_result:
+            login_limiter.record_failure(ip, body.username)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Incorrect email or password",
             )
         payload, pb_token = pb_result
+        login_limiter.record_success(ip, body.username)
         response.set_cookie(value=pb_token, max_age=_COOKIE_MAX_AGE, **_cookie_attrs())
         logger.info(f"User '{payload.username}' logged in via PocketBase (role={payload.role!r})")
         return {
@@ -558,11 +573,13 @@ async def login(body: LoginRequest, response: Response) -> dict:
     # Standard JWT + bcrypt mode
     result = authenticate(body.username, body.password)
     if not result:
+        login_limiter.record_failure(ip, body.username)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
         )
 
+    login_limiter.record_success(ip, body.username)
     token = create_token(result.username, result.role, result.user_id)
     response.set_cookie(value=token, max_age=_COOKIE_MAX_AGE, **_cookie_attrs())
 
@@ -594,6 +611,12 @@ async def device_login(body: DeviceLoginRequest, response: Response) -> dict:
     """Exchange a device pairing code and PIN for the account's normal cookie."""
 
     _require_builtin_device_auth()
+    # Device-login already has a per-credential PIN lockout (pin_locked_until
+    # in device_credentials.py) that self-recovers and survives restarts — it
+    # is the more specific, correct mechanism here, so the generic IP+username
+    # limiter is intentionally NOT applied to this endpoint to avoid masking
+    # its 401 contract with a 429. The /login and /register endpoints, which
+    # had no protection, use the generic limiter below.
     payload = authenticate_device(body.pairing_code, body.pin)
     if payload is None:
         raise HTTPException(
@@ -664,7 +687,7 @@ async def logout(response: Response) -> dict:
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
-async def register(body: RegisterRequest) -> dict:
+async def register(body: RegisterRequest, request: Request) -> dict:
     """
     Bootstrap-only registration.
 
@@ -680,20 +703,35 @@ async def register(body: RegisterRequest) -> dict:
             detail="Auth is disabled — registration is not available.",
         )
 
+    # S-AUTH-02 (RIC-754): throttle repeated registration probes to blunt
+    # account enumeration. Keyed on (IP, username) so a flood of distinct
+    # usernames from one IP still engages the lockout.
+    ip = client_ip(request)
+    locked, retry_after = login_limiter.is_locked(ip, body.username)
+    if locked:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many registration attempts. Try again in {retry_after}s.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
     if POCKETBASE_ENABLED:
         # PocketBase deployments are documented as single-user. Keep registration
         # closed and require admins to provision users in the PocketBase admin UI.
         if not is_first_user():
+            login_limiter.record_failure(ip, body.username)
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Self-registration is closed. Ask an administrator to create your account.",
             )
         result = register_pb(username=body.username, email=body.username, password=body.password)
         if not result:
+            login_limiter.record_failure(ip, body.username)
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Registration failed — username or email may already be taken.",
             )
+        login_limiter.record_success(ip, body.username)
         logger.info(f"First user registered via PocketBase: '{body.username}'")
         return {
             "ok": True,
@@ -706,6 +744,7 @@ async def register(body: RegisterRequest) -> dict:
 
     # Standard mode — only allowed before the first admin exists.
     if not is_first_user():
+        login_limiter.record_failure(ip, body.username)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Self-registration is closed. Ask an administrator to create your account.",
@@ -713,11 +752,13 @@ async def register(body: RegisterRequest) -> dict:
 
     existing = {u["username"] for u in list_users()}
     if body.username in existing:
+        login_limiter.record_failure(ip, body.username)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Username already taken",
         )
 
+    login_limiter.record_success(ip, body.username)
     add_user(body.username, body.password)
     user_id = ""
     role = "user"

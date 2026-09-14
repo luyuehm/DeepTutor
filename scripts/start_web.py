@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import sys
 
@@ -27,11 +28,23 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Use the Next.js development server for frontend work.",
     )
+    parser.add_argument(
+        "--no-auth",
+        action="store_true",
+        help=(
+            "Disable authentication for a loopback single-user session. Only "
+            "safe because uvicorn binds 127.0.0.1 by default; never use this "
+            "when the backend is reachable from the network (S-AUTH-01)."
+        ),
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
+    if args.no_auth:
+        os.environ["AUTH_ENABLED"] = "false"
+        os.environ["NEXT_PUBLIC_AUTH_ENABLED"] = "false"
     start(home=args.home, dev=args.dev)
 
 

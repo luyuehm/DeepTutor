@@ -278,3 +278,20 @@ grep -n 'host="0.0.0.0"' deeptutor/api/run_server.py
 `S-SCA-03`（python 依赖）`S-AUTH-02`（登录限流）`S-AUTH-03`（首用户抢注）`S-SSRF-01`（URL 私网阻断）`S-NET-02`（redis 密码）`S-NET-03`（TLS/反代模板）`S-CFG-02`（审计落盘）`S-DATA-*`（加密备份/日志）`S-SUP-*`（digest/SBOM）`S-COMP-01`（国密排期）
 
 > 子任务已由 owner（RIC-705 主会话）在 Multica 内创建；本审计产出的建议即能直接转成任务描述。
+
+---
+
+## Remediation — RIC-754 follow-up（2026-09-14）
+
+下列 🔴/🟠 项已在 RIC-754 落地（commit 见 feat/ric719-private-deploy）：
+
+| ID | 处置 |
+|---|---|
+| S-AUTH-01 | `DEFAULT_AUTH_SETTINGS.enabled` 改 `True`（`runtime_settings.py`）；非 loopback 部署默认即要求认证。`start_web.py` 新增 `--no-auth` 供 loopback 单机显式关闭。 |
+| S-AUTH-01 (CORS) | `_build_cors_settings` 不再回落 `https?://.*` permissive regex；CORS 恒为显式 origin 白名单（`main.py` + `settings.py` 的 `cors_mode`/`allow_remote_http_origins` 同步）。 |
+| S-NET-01 | `run_server.py` 与 `launcher.py` 本地启动默认 bind `127.0.0.1`（`DEEPTUTOR_BACKEND_HOST` 可显式覆盖）；`docker-compose.yml` 端口绑定改 `127.0.0.1:`，与 `compose.yaml` 一致。容器内仍 bind 0.0.0.0（正确，隔离来自宿主 loopback 绑定）。 |
+| S-AUTH-02 | 新增 `deeptutor/multi_user/login_rate_limit.py`：进程内 (IP, username) 失败计数 + 指数退避锁，`/login`、`/device-login`、`/register` 接入，连续 5 次失败 → 429 + `Retry-After`。配 `tests/multi_user/test_login_rate_limit.py`。 |
+| S-CFG-01 | 合并见 S-AUTH-01；`deploy.sh` `--auth`（含随机口令）/`--no-auth` 强制认证模式示例已落地。 |
+| S-LEAK-02 | `git filter-repo --path .env.example_CN --invert-paths` 已对 fork `luyuehm/DeepTutor` 的 `multi-user`、`guide2.0`、`Deeptutor-v0.6.0-archive` 三分支重写并 force-push；`.env.example_CN` 与 `sk-Rizk…` 字串已从可达历史清除（本地 `git cat-file -e` 与 `git log -S` 复测为空）。 |
+
+🔴 **仍需人工**：S-LEAK-01 / S-LEAK-02 的 DashScope 模板 key `sk-Rizk…`（原 commit `55472f05`）虽已从 fork 历史移除，但**控制台轮换/撤销**必须人工在 DashScope 完成；同时 `main` 及历史 release tag 的 `.env.example_CN` 仍含该 key（未 force-push 主线/标签，避免破坏协作），需另行统一清历史或确认 key 已失效。

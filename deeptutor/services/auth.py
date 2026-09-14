@@ -1,8 +1,10 @@
 """
 Authentication service for DeepTutor.
 
-Disabled by default (auth.enabled=false) so localhost users are unaffected.
-When enabled, guards all API routes with JWT bearer tokens.
+Enabled by default (auth.enabled=true, S-AUTH-01/RIC-754) so non-loopback
+deployments are not exposed without credentials. Local single-user installs can
+opt out with ``--no-auth`` (sets AUTH_ENABLED=false) since uvicorn binds
+127.0.0.1 by default. When enabled, guards all API routes with JWT bearer tokens.
 
 Quick setup (single user via data/user/settings/auth.json):
     1. Set enabled=true

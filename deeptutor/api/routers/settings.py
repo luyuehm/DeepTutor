@@ -749,9 +749,9 @@ def _network_settings_payload() -> dict[str, Any]:
             "frontend_url": f"http://localhost:{effective_system['frontend_port']}",
             "browser_api_base": browser_api_base,
             "api_base_source": _api_base_source(effective_system),
-            "cors_mode": "explicit" if auth_enabled else "permissive",
+            "cors_mode": "explicit",
             "cors_origins": cors_origins,
-            "allow_remote_http_origins": not auth_enabled,
+            "allow_remote_http_origins": False,
         },
         "auth": {
             "enabled": auth_enabled,

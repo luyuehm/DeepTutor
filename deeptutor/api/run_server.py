@@ -77,9 +77,16 @@ def main() -> None:
             "Development reload and backend_workers > 1 are mutually exclusive. "
             "Set backend_workers=1 or disable DEEPTUTOR_DEV_RELOAD."
         )
+    # Security default (S-NET-01, RIC-754): bind loopback only. The earlier
+    # ``0.0.0.0`` default published the API to every interface, which — combined
+    # with auth-off defaults — exposed the whole management surface on LAN/public
+    # deployments. Exposing the service beyond this machine is now an explicit
+    # opt-in: set DEEPTUTOR_BACKEND_HOST (or run behind a reverse proxy that
+    # forwards to 127.0.0.1) when you intend to serve remote clients.
+    backend_host = os.environ.get("DEEPTUTOR_BACKEND_HOST", "").strip() or "127.0.0.1"
     uvicorn.run(
         "deeptutor.api.main:app",
-        host="0.0.0.0",
+        host=backend_host,
         port=backend_port,
         reload=dev_reload,
         workers=backend_workers,

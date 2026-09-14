@@ -75,6 +75,12 @@ WORKDIR /app
 # Install system dependencies
 # Note: libgl1 and libglib2.0-0 are required for OpenCV (used by mineru)
 # Rust is required for building tiktoken and other packages without pre-built wheels
+#
+# `apt-get upgrade` clears the Debian 13 (trixie) OS-layer CVEs that ship in
+# the python:3.11-slim base (perl-base, libsqlite3-0, libpcre2, gzip, …). The
+# base image's package lists are stale, so the fixed deb13u1/u2 versions only
+# surface after `apt-get update` — without this step the rebuilt image keeps
+# the same 45 CRITICAL/HIGH the RIC-705 audit flagged (S-CONT-01).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
@@ -86,6 +92,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrender1 \
     pkg-config \
     libssl-dev \
+    && apt-get upgrade -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 

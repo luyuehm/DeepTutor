@@ -88,12 +88,14 @@ def _build_cors_settings() -> dict[str, object]:
         if origin not in origins:
             origins.append(origin)
 
-    # Auth is disabled by default. In that local/single-user mode, mirror the
-    # pre-v1.3.8 behavior and allow remote Docker/LAN origins out of the box.
-    # When auth is enabled, require explicit CORS_ORIGIN(S) for credentialed
-    # cross-origin requests.
-    allow_origin_regex = None if auth_settings["enabled"] else r"https?://.*"
-    mode = "explicit" if auth_settings["enabled"] else "permissive"
+    # Security default (S-AUTH-01, RIC-754): NEVER fall back to a permissive
+    # ``https?://.*`` origin regex. Earlier builds widened CORS to any origin
+    # whenever auth was off; combined with allow_credentials=True that exposed
+    # the whole management surface to any network caller. The localhost
+    # origins above already cover loopback single-user deployments; anything
+    # beyond that must be named explicitly via CORS_ORIGIN(S).
+    allow_origin_regex = None
+    mode = "explicit"
     return {
         "allow_origins": origins,
         "allow_origin_regex": allow_origin_regex,

@@ -1352,13 +1352,20 @@ def start(
     # this variable after the build has completed.
     common_env.pop("DEEPTUTOR_NEXT_DIST_DIR", None)
 
+    # Security default (S-NET-01, RIC-754): bind loopback for local launches so
+    # the API is not published to LAN/public interfaces out of the box. The
+    # Docker container path sets its own supervisord host (0.0.0.0 inside the
+    # container is correct — host-side isolation comes from the loopback port
+    # binding in docker-compose.yml). Override with DEEPTUTOR_BACKEND_HOST to
+    # serve remote clients directly (or place a reverse proxy in front).
+    backend_host = os.environ.get("DEEPTUTOR_BACKEND_HOST", "").strip() or "127.0.0.1"
     backend_cmd = [
         sys.executable,
         "-m",
         "uvicorn",
         "deeptutor.api.main:app",
         "--host",
-        "0.0.0.0",
+        backend_host,
         "--port",
         str(backend_port),
         "--log-level",

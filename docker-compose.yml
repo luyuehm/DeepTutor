@@ -52,7 +52,10 @@ services:
     container_name: pocketbase
     restart: unless-stopped
     ports:
-      - "${DEEPTUTOR_DOCKER_POCKETBASE_PORT:-8090}:8090"
+      # S-NET-01 (RIC-754): loopback-only by default so PocketBase is not
+      # published to LAN/public interfaces. Drop the `127.0.0.1:` prefix
+      # (or set a host override) only when you intentionally expose it.
+      - "127.0.0.1:${DEEPTUTOR_DOCKER_POCKETBASE_PORT:-8090}:8090"
     volumes:
       # The upstream pocketbase image's entrypoint uses absolute paths
       # (no /pb/ prefix): --dir=/pb_data --publicDir=/pb_public
@@ -82,8 +85,13 @@ services:
     container_name: deeptutor
     restart: unless-stopped
     ports:
-      - "${DEEPTUTOR_DOCKER_BACKEND_PORT:-8001}:${DEEPTUTOR_DOCKER_BACKEND_PORT:-8001}"
-      - "${DEEPTUTOR_DOCKER_FRONTEND_PORT:-3782}:${DEEPTUTOR_DOCKER_FRONTEND_PORT:-3782}"
+      # S-NET-01 (RIC-754): host-side bindings are LOOPBACK ONLY by default,
+      # matching compose.yaml. The in-container listeners still bind 0.0.0.0
+      # (correct — isolation comes from this host-side loopback prefix).
+      # Drop the `127.0.0.1:` prefix only when serving beyond this host,
+      # and then put a TLS-terminating reverse proxy + firewall in front.
+      - "127.0.0.1:${DEEPTUTOR_DOCKER_BACKEND_PORT:-8001}:${DEEPTUTOR_DOCKER_BACKEND_PORT:-8001}"
+      - "127.0.0.1:${DEEPTUTOR_DOCKER_FRONTEND_PORT:-3782}:${DEEPTUTOR_DOCKER_FRONTEND_PORT:-3782}"
 
     volumes:
       # Everything DeepTutor persists lives under ./data — one tree to mount

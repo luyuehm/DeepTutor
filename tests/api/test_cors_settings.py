@@ -7,9 +7,13 @@ from fastapi.testclient import TestClient
 from deeptutor.api import main as api_main
 
 
-def test_cors_allows_remote_http_origins_when_auth_disabled(
+def test_cors_never_falls_back_to_permissive_when_auth_disabled(
     monkeypatch,
 ) -> None:
+    # S-AUTH-01 (RIC-754): even with auth disabled, CORS must NOT widen to a
+    # permissive ``https?://.*`` regex. The earlier behavior exposed the whole
+    # management surface to any network caller when combined with
+    # allow_credentials=True. Only explicit localhost origins ship by default.
     monkeypatch.delenv("AUTH_ENABLED", raising=False)
     monkeypatch.delenv("CORS_ORIGIN", raising=False)
     monkeypatch.delenv("CORS_ORIGINS", raising=False)
@@ -17,9 +21,12 @@ def test_cors_allows_remote_http_origins_when_auth_disabled(
 
     settings = api_main._build_cors_settings()
 
-    assert settings["allow_origin_regex"] == r"https?://.*"
+    assert settings["allow_origin_regex"] is None
+    assert settings["mode"] == "explicit"
     assert "http://localhost:3782" in settings["allow_origins"]
     assert "http://127.0.0.1:3782" in settings["allow_origins"]
+    # No permissive wildcard origin sneaks in.
+    assert all(o != "*" and ".*" not in o for o in settings["allow_origins"])
 
 
 def test_cors_requires_explicit_origins_when_auth_enabled(monkeypatch) -> None:

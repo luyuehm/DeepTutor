@@ -34,7 +34,11 @@ def test_unhandled_exception_response_carries_cors_headers() -> None:
     middleware registered inside CORS precisely so this header survives.
     """
     client = _client_with_failing_route()
-    origin = "http://cross-origin.test"
+    # Use a localhost origin so the explicit-origin CORS policy grants it
+    # (S-AUTH-01/RIC-754 removed the permissive fallback that matched any
+    # origin). The test's point is the 500 carrying the same CORS headers a
+    # 200 would, not the breadth of the allow-list.
+    origin = "http://localhost:3782"
 
     ok = client.get("/api/health", headers={"Origin": origin})
     error = client.get("/api/__test_unhandled_exception__", headers={"Origin": origin})

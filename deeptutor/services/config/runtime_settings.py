@@ -71,7 +71,12 @@ CHAT_ATTACHMENT_CHARS_RANGE = (10_000, 5_000_000)
 
 DEFAULT_AUTH_SETTINGS: dict[str, Any] = {
     "version": 1,
-    "enabled": False,
+    # Security default (S-AUTH-01, RIC-754): authentication is ON out of the
+    # box. Loopback single-user deployments that want passwordless access can
+    # opt back out with AUTH_ENABLED=false / --no-auth. Binding uvicorn to
+    # 127.0.0.1 (see run_server.py) keeps the unauthenticated surface local
+    # even when someone flips this off; a non-loopback bind MUST keep auth on.
+    "enabled": True,
     "username": "admin",
     "password_hash": "",
     "token_expire_hours": 24,

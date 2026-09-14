@@ -10,18 +10,23 @@
 #     local-llm/README.md，Ollama / vLLM / llama.cpp）
 #
 # 用法:
-#   ./private/deploy.sh                # 在线一键拉起
+#   ./private/deploy.sh                # 在线一键拉起（认证默认开启，首次需注册管理员）
 #   ./private/deploy.sh --offline      # 离线（从 images/ 导入镜像后拉起）
 #   ./private/deploy.sh --local-llm    # 额外启动本地 LLM 网关(Ollama)
 #   ./private/deploy.sh --host 203.0.113.10   # 远端服务器(浏览器从别处访问)
-#   ./private/deploy.sh --auth admin secret123 # 开启基础认证（可选）
+#   ./private/deploy.sh --auth admin secret123 # 显式设置管理员账密（推荐）
+#   ./private/deploy.sh --auth         # 强制认证：随机生成管理员口令并打印一次
+#   ./private/deploy.sh --no-auth      # 关闭认证（仅 loopback 单机自用，勿用于公网）
 #   ./private/deploy.sh down           # 停止（保留数据卷）
 #   ./private/deploy.sh wipe           # 停止并清空本地数据（破坏性）
 #   ./private/deploy.sh --check        # 只做前置检查，不拉起（只读）
 #
 # 常用选项:
 #   --host <ip|hostname>   设置 system.json next_public_api_base_external
-#   --auth <user> <pass>   开启管理员基础认证（写入 auth.json）
+#   --auth [<user> <pass>] 开启管理员基础认证（写入 auth.json）。不带账密时
+#                          随机生成口令并在控制台打印一次——强制认证模式的推荐用法
+#   --no-auth              关闭认证（AUTH_ENABLED=false）。仅适合 loopback 单机
+#                          自用；非本地网络部署严禁使用（S-AUTH-01, RIC-754）
 #   --offline              offline 模式（镜像从 private/images/ 导入）
 #   --local-llm            同时拉起本地 LLM 网关（Ollama，默认 localhost:11434）
 #   --port <backend>:<frontend>  覆盖宿主机端口映射
@@ -39,6 +44,9 @@ CHECK_ONLY=0
 HOST_EXTERNAL=""
 AUTH_USER=""
 AUTH_PASS=""
+AUTH_RANDOM=0
+AUTH_EXPLICIT=0
+NO_AUTH=0
 BACKEND_PORT_OVERRIDE=""
 FRONTEND_PORT_OVERRIDE=""
 
@@ -64,7 +72,15 @@ while [[ $# -gt 0 ]]; do
       echo "已停止并清空本地数据。"; exit 0 ;;
     --check) CHECK_ONLY=1; shift ;;
     --host) HOST_EXTERNAL="$2"; shift 2 ;;
-    --auth) AUTH_USER="$2"; AUTH_PASS="$3"; shift 3 ;;
+    --auth)
+      # --auth alone  => 强制认证 + 随机口令；--auth user pass => 显式账密
+      AUTH_EXPLICIT=1
+      if [[ $# -ge 3 && "${2}" != -* && "${3}" != -* ]]; then
+        AUTH_USER="$2"; AUTH_PASS="$3"; shift 3
+      else
+        AUTH_RANDOM=1; shift
+      fi ;;
+    --no-auth) NO_AUTH=1; shift ;;
     --offline) OFFLINE_MODE=1; shift ;;
     --local-llm) LOCAL_LLM=1; shift ;;
     --port) BACKEND_PORT_OVERRIDE="${2%%:*}"; FRONTEND_PORT_OVERRIDE="${2##*:}"; shift 2 ;;
@@ -151,12 +167,30 @@ JSON
 fi
 
 # ---- 3. 认证 ----
-if [[ -n "$AUTH_USER" && -n "$AUTH_PASS" ]]; then
-  # 用与 deeptutor.services.auth.hash_password 相同的 bcrypt 格式生成口令哈希
-  PY="python3"
-  if [[ -x ".venv/bin/python" ]] && .venv/bin/python -c "import bcrypt" 2>/dev/null; then
-    PY=".venv/bin/python"
-  fi
+# S-AUTH-01 (RIC-754): 认证默认开启。部署脚本据此保证：
+# --auth user pass  -> 写入指定管理员账密（推荐）
+# --auth (无参)     -> 随机生成管理员口令并打印一次（强制认证模式）
+# --no-auth         -> 显式关闭认证（仅 loopback 单机自用）
+# 未传任何认证参数 -> 不写 auth.json；服务以默认（认证开启）启动，首位用户经 /register 注册即成管理员
+# 已存在的 auth.json 不会被覆盖（避免清掉运营中改过的口令）。
+PY="python3"
+if [[ -x ".venv/bin/python" ]] && .venv/bin/python -c "import bcrypt" 2>/dev/null; then
+  PY=".venv/bin/python"
+fi
+
+if [[ "$NO_AUTH" == "1" ]]; then
+  cat > data/user/settings/auth.json <<'JSON2'
+{
+  "version": 1,
+  "enabled": false,
+  "username": "admin",
+  "password_hash": "",
+  "token_expire_hours": 24,
+  "cookie_secure": false
+}
+JSON2
+  echo "🔓 已关闭认证（仅限 loopback 单机自用；公网/LAN 部署严禁使用）"
+elif [[ -n "$AUTH_USER" && -n "$AUTH_PASS" ]]; then
   HASH="$("$PY" -c 'import sys, bcrypt; print(bcrypt.hashpw(sys.stdin.read().rstrip("\n").encode(), bcrypt.gensalt()).decode())' <<< "$AUTH_PASS")"
   cat > data/user/settings/auth.json <<JSON2
 {
@@ -169,6 +203,29 @@ if [[ -n "$AUTH_USER" && -n "$AUTH_PASS" ]]; then
 }
 JSON2
   echo "🔐 已开启基础认证（用户: $AUTH_USER）"
+elif [[ "$AUTH_RANDOM" == "1" ]]; then
+  AUTH_USER="admin"
+  AUTH_PASS="$("$PY" -c 'import secrets; print(secrets.token_urlsafe(18))')"
+  HASH="$("$PY" -c 'import sys, bcrypt; print(bcrypt.hashpw(sys.stdin.read().rstrip("\n").encode(), bcrypt.gensalt()).decode())' <<< "$AUTH_PASS")"
+  cat > data/user/settings/auth.json <<JSON2
+{
+  "version": 1,
+  "enabled": true,
+  "username": "$AUTH_USER",
+  "password_hash": "$HASH",
+  "token_expire_hours": 24,
+  "cookie_secure": false
+}
+JSON2
+  echo "🔐 强制认证：已生成随机管理员口令"
+  echo "   用户名: $AUTH_USER"
+  echo "   口令  : $AUTH_PASS"
+  echo "   ⚠️ 请立即保存；此口令仅本次显示，不会再次输出"
+elif [[ ! -f data/user/settings/auth.json ]]; then
+  echo "🔐 认证默认开启。未指定 --auth：首位用户经 /register 注册即成管理员"
+  echo "   （公网部署推荐: ./private/deploy.sh --auth <user> <pass> 或 --auth 随机口令）"
+else
+  echo "🔐 沿用已有 data/user/settings/auth.json"
 fi
 
 # ---- 4. 远端 host（API base URL） ----
