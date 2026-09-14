@@ -12,6 +12,7 @@ import {
   KeyRound,
   Users,
   ShieldCheck,
+  BarChart3,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -81,6 +82,12 @@ export default function AdminHubPage() {
       title: t("Card Key (CDK) Management"),
       description: t("Batch-generate card keys and export as CSV."),
       icon: <KeyRound size={20} />,
+    },
+    {
+      href: "/admin/ops-dashboard",
+      title: t("Ops Dashboard"),
+      description: t("Revenue, renewal, funnel and mastery — tech-flow aggregated view."),
+      icon: <BarChart3 size={20} />,
     },
   ];
 
