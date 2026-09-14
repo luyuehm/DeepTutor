@@ -493,6 +493,7 @@ from deeptutor.api.routers import (
     mcp_settings,
     memory,
     notebook,
+    ops_dashboard,
     outputs,
     partner_groups,
     partners,
@@ -682,6 +683,15 @@ app.include_router(
 )
 app.include_router(personas.router, prefix="/api", tags=["personas"], dependencies=_auth)
 app.include_router(tools_router.router, prefix="/api/tools", tags=["tools"], dependencies=_auth)
+# Ops dashboard (RIC-720, D3) — read-only aggregation over existing data.
+# Admin-gated inside the router; mounted under ``_auth`` like the payment
+# admin surface so unauthenticated requests are rejected before the gate.
+app.include_router(
+    ops_dashboard.router,
+    prefix="/api/ops",
+    tags=["ops-dashboard"],
+    dependencies=_auth,
+)
 app.include_router(system.router, prefix="/api/system", tags=["system"], dependencies=_auth)
 app.include_router(voice.router, prefix="/api/voice", tags=["voice"], dependencies=_auth)
 app.include_router(
